@@ -51,9 +51,10 @@ update_threshold=86400    # 1day
 streamday=4 # Stream on Sunday
 
 # Source the config file
-CONFIG_FILE=$WORKING_DIR/config
+CONFIG_FILE=~/.granny-streams-youtube/config
+echo "CONFIGFILE=$CONFIG_FILE"
 if test -f $CONFIG_FILE ; then
-    . $CONFIG_FILE
+    source $CONFIG_FILE
 else
     touch $CONFIG_FILE
 fi
@@ -68,7 +69,7 @@ echo "Weekday: $WEEKDAY"
 # Only livestream on sunday
 if (( $WEEKDAY == $streamday )); then
     echo -e "[$(date)] Execution...\n" >> $LOGFILE
-    
+        
     # 1) get raw data
     curl $LIVESTREAM_URL &> $RAW_RESPONSE_FILE     # Do this once every day. The other code downwards can then also be done on the existing files
 
@@ -129,7 +130,7 @@ if (( $WEEKDAY == $streamday )); then
     fi
     
     # Play livestream
-    if (( $IS_LIVE == "true" )); then
+    if [ ! -z "$IS_LIVE" ]; then
         
         # Play stream using mpv. Later on Raspi youse omx or sth else.
         mpv $LIVESTREAM_URL --fs >> $LOGFILE
