@@ -16,9 +16,26 @@ echo "------------------------------"
 # At first it checks for the correct day and time.
 # Then it checks for a running livestream every minute for ten minutes.
 # Then it plays the livestream. If there is no livestream it checks
-# again at 11:00am.
-# 
-# ----------------------------------------------------------------------
+# again at 11:00am. 
+
+
+
+# ----------------------------- USER INPUT -----------------------------
+# NOTE Here you can define the channelID you want to stream from.
+#      This is the NASA livestream.
+CHANNEL_ID="UCLA_DiR1FfKNvjuUpBHmylQ"
+
+# NOTE Here you can define the day of week you want to stream.
+#      Monday = 1; Sunday=7
+streamday=1
+
+# NOTE Here you can define the time the script will start to check for
+#      a running stream and the time the script will automatically stop.
+start_hour=9
+start_min=30
+stop_hour=10
+stop_min=45
+
 
 
 # ----------------------- Checks And Preparation -----------------------
@@ -44,67 +61,63 @@ echo "------------------------------"
 #fi
 
 
-# Create (hidden) working direcectory in homefolder
+# Check/create (hidden) working direcectory in homefolder
 WORKING_DIR=~/.granny-streams-youtube
 mkdir -p $WORKING_DIR
 
-# Working files
+# Defining files to work with
 RAW_RESPONSE_FILE=$WORKING_DIR/raw_response_file.txt
 CLEAN_RESPONSE_FILE=$WORKING_DIR/clean_response_file.txt
 LOGFILE=$WORKING_DIR/grannyslog.txt
 echo -e "[+] Logfile: $LOGFILE"
 
-# Default values (NASA livestream). Can be specified in the config file located in at ~/granny-streams-youtube/
-CHANNEL_ID="UCLA_DiR1FfKNvjuUpBHmylQ"
-LIVESTREAM_URL="https://www.youtube.com/channel/UCLA_DiR1FfKNvjuUpBHmylQ/live"
-update_threshold=86400    # 1day
-streamday=7 # Stream on Sunday
-
-# Source the config file. This overrides the CHANNEL_ID and LIVESTREAM_URL etc.
+# Source the config file (for example to override the CHANNEL_ID and LIVESTREAM_URL etc.
 CONFIG_FILE=~/.granny-streams-youtube/config
-
 echo "CONFIGFILE=$CONFIG_FILE" >> $LOGFILE
+
 if test -f $CONFIG_FILE ; then
     source $CONFIG_FILE
-    
-    echo -e "[$(date)] CHANNEL_ID = $CHANNEL_ID" >> $LOGFILE
-    echo -e "[$(date)] LIVESTREAM_URL = $LIVESTREAM_URL" >> $LOGFILE
-else
-    touch $CONFIG_FILE
 fi
+# Default values (NASA livestream). Can be specified in the config file located in at ~/granny-streams-youtube/
+LIVESTREAM_URL="https://www.youtube.com/channel/$CHANNEL_ID/live"
+REJECT_COOKIE="SOCS=CAESEwgDEgk0OTEzMjUyMTcaAmVuIAEaBgiA3Z-cBg"
+
+echo -e "[$(date)] CHANNEL_ID = $CHANNEL_ID" >> $LOGFILE
+echo -e "[$(date)] LIVESTREAM_URL = $LIVESTREAM_URL" >> $LOGFILE
+echo -e "[$(date)] STREAMDAY = $streamday" >> $LOGFILE
+echo -e "[$(date)] start_hour = $start_hour" >> $LOGFILE
+echo -e "[$(date)] start_min = $start_min" >> $LOGFILE
+echo -e "[$(date)] stop_hour = $stop_hour" >> $LOGFILE
+echo -e "[$(date)] stop_min = $stop_min" >> $LOGFILE
 
 
 # ---------------------------- Start Action ----------------------------
 
+# Current day of week
+CURRENT_WEEKDAY=$(date +%u)
 
-WEEKDAY=$(date +%u)
-start_hour=5
-start_min=31
-
-stop_hour=10
-stop_min=45
-
-# Only livestream on sunday
-if (( $WEEKDAY == $streamday )); then
-    echo -e "[$(date)] It is sunday." >> $LOGFILE
+# Check for correct day of week
+if (( $CURRENT_WEEKDAY == $streamday )); then
+    echo -e "[$(date)] Weekday is correct." >> $LOGFILE
     
-    # Check time and sleep if needed, otherwise play livestream
+    # Check for correct time otherwise sleep. If correct try to play livestream
     GO=1
+    BAD_COUNTER=0
     while [ $GO == 1 ]
     do
-        HOUR=$(date +"%_H")
-        MIN=$(date +"%_M")
-        echo -e "[$(date)] $HOUR:$MIN" >> $LOGFILE
+        CURRENT_HOUR=$(date +"%_H")
+        CURRENT_MIN=$(date +"%_M")
+        echo -e "[$(date)] $CURRENT_HOUR:$CURRENT_MIN" >> $LOGFILE
     
         # Check hour
-        if [[ $HOUR -ge $start_hour ]]; then
+        if [[ $CURRENT_HOUR -ge $start_hour ]]; then
 
             # Check minute
-            if [[ $MIN -ge $start_min ]]; then
-                echo -e "[$(date)] Time is ready. Request..." >> $LOGFILE
+            if [[ $CURRENT_MIN -ge $start_min ]]; then
+                echo -e "[$(date)] Time is ready. Make request..." >> $LOGFILE
         
                 # 1) get raw data
-                curl $LIVESTREAM_URL &> $RAW_RESPONSE_FILE
+                curl $REJECT_COOKIE $LIVESTREAM_URL &> $RAW_RESPONSE_FILE
 
                 # 2) clean up and format
                 cat $RAW_RESPONSE_FILE | sed -n 's/.*var ytInitialPlayerResponse = \({[^<]*}\);.*/\1/p' | jq -r . > $CLEAN_RESPONSE_FILE
@@ -135,61 +148,60 @@ if (( $WEEKDAY == $streamday )); then
 
                 # Get upcoming time when available
                 # This key will be missing if no upcoming events available
-                UPCOMING_TIME=$(cat $CLEAN_RESPONSE_FILE | jq -r '.playabilityStatus.liveStreamability.liveStreamabilityRenderer.offlineSlate.liveStreamOfflineSlateRenderer.scheduledStartTime | select(.!=null)')
-                if [ ! -z "$UPCOMING_TIME" ]; then
-                    date_calc=`date -d @$UPCOMING_TIME`
+                SCEDULED_TIME=$(cat $CLEAN_RESPONSE_FILE | jq -r '.playabilityStatus.liveStreamability.liveStreamabilityRenderer.offlineSlate.liveStreamOfflineSlateRenderer.scheduledStartTime | select(.!=null)')
+                if [ ! -z "$SCEDULED_TIME" ]; then
+                    date_calc=`date -d @$SCEDULED_TIME`
+                    echo -e "[$(date)] date_calc: $date_calc" >> $LOGFILE
+                    
+                    seconds_left=$(( $SCEDULED_TIME - $(date +%s) ))
+                    echo -e "[$(date)] seconds_left: $seconds_left" >> $LOGFILE
                 fi
 
                 # Get video ID
                 VIDEO_ID=$(cat $CLEAN_RESPONSE_FILE | jq -r '.videoDetails.videoId')
                 
-                
                 echo -e "[$(date)] IS_LIVE: $IS_LIVE" >> $LOGFILE
                 echo -e "[$(date)] PLAYABILITY: $PLAYABILITY" >> $LOGFILE
                 echo -e "[$(date)] PLAYABILITY_REASON: $PLAYABILITY_REASON" >> $LOGFILE
                 echo -e "[$(date)] STREAMABILITY: $STREAMABILITY" >> $LOGFILE
-                echo -e "[$(date)] UPCOMING_TIME: $UPCOMING_TIME" >> $LOGFILE
+                echo -e "[$(date)] SCEDULED_TIME: $SCEDULED_TIME" >> $LOGFILE
+
                 
-                #if (( $UPCOMING_TIME != null )); then   
-                if [ ! -z "$UPCOMING_TIME" ]; then
-                    echo -e "[$(date)] date_calc: $date_calc" >> $LOGFILE
-                    
-                    seconds_left=$(( $UPCOMING_TIME - $(date +%s) ))
-                    echo -e "[$(date)] seconds_left: $seconds_left" >> $LOGFILE
-                    
-                    if (( $seconds_left < 0 )); then
-                        echo -e "[$(date)] Seconds left are less than zero." >> $LOGFILE
-                    else
-                        echo -e "[$(date)] seconds left are greater than zero." >> $LOGFILE
-                    fi
-                
-                fi
-                
-                # Play livestream
+                # If livestream is running play it. Otherwise sleep.
                 if [ ! -z "$IS_LIVE" ]; then
                     echo -e "[$(date)] Starting player..." >> $LOGFILE
                     
                     # Play stream using mpv. Later on Raspi youse omx or sth else.
                     mpv $LIVESTREAM_URL --fs >> $LOGFILE 2>/dev/null
                     
+                    # If mpv cannot load stream it exits and script will go on infinetly. BAD_COUNTER will prevent this.
+                    # TODO: closing omx manually will increment BAD_COUNTER to...
+                    BAD_COUNTER=$(( $BAD_COUNTER + 1 ))
+                    echo -e "[$(date)] BAD_COUNTER: $BAD_COUNTER" >> $LOGFILE                    
+                    if (( $BAD_COUNTER > 5 )); then
+                        echo -e "[$(date)] BAD_COUNTER greater than 5! Exiting... \n" >> $LOGFILE
+                        exit
+                    fi
+                    
                     echo "" >> $LOGFILE
                     
                 else
-                    echo -e "[$(date)] No live stream. (IS_LIVE = null). Sleeping..." >> $LOGFILE             
-                    sleep 1m
+                    echo -e "[$(date)] No live stream. (IS_LIVE = null). Sleeping..." >> $LOGFILE  
+                    
+                    if (( $seconds_left > 0 )); then
+                        echo -e "[$(date)] ... $seconds_left seconds" >> $LOGFILE  
+                        sleep $seconds_left
+                    else
+                        echo -e "[$(date)] ... 1 minute" >> $LOGFILE  
+                        sleep 1m
+                    fi
                 fi
                 
-                # Get status
-                #youtube-dl --quiet --skip-download $LIVESTREAM_URL &> $LOGFILE    
                 
-                # could be useful: timeout 2h mpv...
-                
-                #if (( $? == 1 )); then
-                    #echo -e "SORRY \n"
-                    #cat $LOGFILE
-                    
-                if [[ $HOUR -ge $stop_hour ]]; then                
-                    if [[ $MIN -ge $stop_min ]]; then
+
+                # Check if script should stop execution
+                if [[ $CURRENT_HOUR -ge $stop_hour ]]; then                
+                    if [[ $CURRENT_MIN -ge $stop_min ]]; then
                         echo -e "[$(date)] Its time to stop. Exiting... \n"
                         exit
                     fi                
@@ -198,12 +210,12 @@ if (( $WEEKDAY == $streamday )); then
                 echo -e "[$(date)] Bottom of while loop checking request. \n" >> $LOGFILE
                 
             else
-                echo -e "[$(date)] Its too early (Min). Sleep..." >> $LOGFILE
+                echo -e "[$(date)] Its too early. START_MIN not reached yet. Sleeping 1m." >> $LOGFILE
                 sleep 1m
             fi
         
         else
-            echo -e "[$(date)] Its before 9 am. Exiting... \n" >> $LOGFILE
+            echo -e "[$(date)] START_HOUR not reached yet. Exiting... \n" >> $LOGFILE
             exit
         fi
         
@@ -211,8 +223,11 @@ if (( $WEEKDAY == $streamday )); then
     done
 
 else
-    delta=$(( 7-$WEEKDAY ))
-    echo -e "[$(date)] The next stream is in $delta day(s). Exiting... \n" >> $LOGFILE
+    echo -e "[$(date)] The next stream is in $$(( $streamday - $CURRENT_WEEKDAY )) day(s). Exiting... \n" >> $LOGFILE
 fi
 
 
+# Get status
+#youtube-dl --quiet --skip-download $LIVESTREAM_URL &> $LOGFILE    
+
+# could be useful: timeout 2h mpv...
